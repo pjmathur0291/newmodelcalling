@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Request a Call</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <h1>Request a Call from AI Agent</h1>
+
+  <form id="leadForm">
+    <label>
+      Your Name:
+      <input type="text" name="name" placeholder="Jane Doe" />
+    </label>
+    <br/><br/>
+    <label>
+      Your Phone (E.164, e.g. +14155552671):
+      <input type="tel" name="phoneNumber" required />
+    </label>
+    <br/><br/>
+    <button type="submit">Call Me</button>
+  </form>
+
+  <p id="status"></p>
+
+  <script>
+    const form = document.getElementById("leadForm");
+    const statusEl = document.getElementById("status");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      statusEl.textContent = "Submitting…";
+
+      const formData = new FormData(form);
+      const payload = {
+        name: formData.get("name") || "",
+        phoneNumber: formData.get("phoneNumber") || "",
+      };
+
+      try {
+        const res = await fetch("/api/call-user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          statusEl.textContent = "📞 Call is on the way!";
+        } else {
+          statusEl.textContent = "❌ " + (data.error || "Failed to trigger call");
+        }
+      } catch (err) {
+        statusEl.textContent = "❌ " + err.message;
+      }
+    });
+  </script>
+</body>
+</html>
