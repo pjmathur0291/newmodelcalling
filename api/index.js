@@ -123,18 +123,26 @@ app.post("/api/call-user", async (req, res) => {
       return res.status(400).json({ success: false, error: "Phone must be in E.164 format (e.g. +14155552671)" });
     }
 
-    // Check if Twilio is configured
+    // Demo mode - if Twilio is not configured, simulate success
     if (!client) {
-      return res.status(500).json({ 
-        success: false, 
-        error: "Twilio is not configured. Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables.",
-        debug: {
-          has_account_sid: !!process.env.TWILIO_ACCOUNT_SID,
-          has_auth_token: !!process.env.TWILIO_AUTH_TOKEN,
-          has_phone_number: !!process.env.TWILIO_PHONE_NUMBER,
-          environment: process.env.NODE_ENV
-        }
-      });
+      try {
+        // Create lead in database
+        const leadId = await db.createLead(phoneNumber, name);
+        
+        return res.json({
+          success: true,
+          message: "Demo mode: Lead captured successfully! (Twilio not configured)",
+          callSid: "DEMO_" + Date.now(),
+          leadId: leadId,
+          demo: true
+        });
+      } catch (error) {
+        console.error("Error creating lead:", error);
+        return res.status(500).json({
+          success: false,
+          error: "Error creating lead: " + error.message
+        });
+      }
     }
 
     // For Vercel deployment, use the request host
