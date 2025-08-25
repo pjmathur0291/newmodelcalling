@@ -12,7 +12,6 @@ export default async function handler(req, res) {
       process.env.TWILIO_AUTH_TOKEN
     );
 
-    // Extract phone number (or other params) from request body
     const { to } = req.body;
 
     if (!to) {
@@ -20,7 +19,7 @@ export default async function handler(req, res) {
     }
 
     const call = await client.calls.create({
-      url: "http://demo.twilio.com/docs/voice.xml", // replace with your TwiML webhook if needed
+      url: "http://demo.twilio.com/docs/voice.xml", // Replace with your TwiML webhook if needed
       to,
       from: process.env.TWILIO_PHONE_NUMBER,
     });
