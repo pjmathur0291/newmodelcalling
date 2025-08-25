@@ -4,6 +4,7 @@ const bodyParser = require("body-parser");
 const dotenv = require("dotenv");
 const path = require("path");
 const twilio = require("twilio");
+const db = require("./database");
 
 dotenv.config();
 
@@ -13,6 +14,13 @@ const baseUrl = process.env.APP_BASE_URL; // e.g., https://abcd-1234.ngrok-free.
 
 // Twilio client
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+// Initialize database
+db.initDatabase().then(() => {
+  console.log("✅ Database initialized successfully");
+}).catch(err => {
+  console.error("❌ Database initialization failed:", err);
+});
 
 // Middleware
 app.use(bodyParser.json());
@@ -31,6 +39,36 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// Admin dashboard
+app.get("/admin", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+
+// API endpoint to view all leads
+app.get("/api/leads", async (req, res) => {
+  try {
+    const leads = await db.getAllLeads();
+    res.json({ success: true, leads });
+  } catch (err) {
+    console.error("Error fetching leads:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API endpoint to view a specific lead with responses
+app.get("/api/leads/:leadId", async (req, res) => {
+  try {
+    const lead = await db.getLeadWithResponses(req.params.leadId);
+    if (!lead) {
+      return res.status(404).json({ success: false, error: "Lead not found" });
+    }
+    res.json({ success: true, lead });
+  } catch (err) {
+    console.error("Error fetching lead:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 /**
  * STEP A: Form posts here with { name, phone, ... }
  * We trigger an outbound call to the user. Twilio will fetch TwiML from our /voice endpoint.
@@ -47,8 +85,11 @@ app.post("/api/call-user", async (req, res) => {
       return res.status(500).json({ success: false, error: "APP_BASE_URL is not set in .env" });
     }
 
-    // Optional: pass query params to /voice so you can personalize greeting
-    const voiceUrl = `${baseUrl}/voice?name=${encodeURIComponent(name || "")}`;
+    // Create a new lead in the database
+    const leadId = await db.createLead(to, name);
+
+    // Pass leadId and name to /voice so we can track the conversation
+    const voiceUrl = `${baseUrl}/voice?leadId=${encodeURIComponent(leadId)}&name=${encodeURIComponent(name || "")}`;
 
     const call = await client.calls.create({
       to,
@@ -57,7 +98,7 @@ app.post("/api/call-user", async (req, res) => {
       // machineDetection: 'Enable', // optional
     });
 
-    return res.json({ success: true, callSid: call.sid });
+    return res.json({ success: true, callSid: call.sid, leadId });
   } catch (err) {
     console.error("Error creating call:", err);
     return res.status(500).json({ success: false, error: err.message });
@@ -66,51 +107,144 @@ app.post("/api/call-user", async (req, res) => {
 
 /**
  * STEP B: Twilio hits this webhook to get TwiML for the live call.
- * For now, this is a simple "AI agent" placeholder using <Say> + <Gather speech>.
- * You can later replace with a streaming AI pipeline.
+ * This starts the question-answer session with the lead.
  */
-app.post("/voice", (req, res) => {
-  const twiml = new twilio.twiml.VoiceResponse();
+app.post("/voice", async (req, res) => {
+  try {
+    const twiml = new twilio.twiml.VoiceResponse();
+    const leadId = req.query.leadId;
+    const name = (req.query.name || "").trim();
+    
+    if (!leadId) {
+      twiml.say("Error: Lead ID not found. Goodbye!");
+      return res.type("text/xml").send(twiml.toString());
+    }
 
-  const name = (req.query.name || "").trim();
-  const greeting = name ? `Hello ${name}.` : "Hello.";
+    const greeting = name ? `Hello ${name}.` : "Hello.";
 
-  // Welcome + prompt user to speak. Twilio will transcribe a short response.
-  const gather = twiml.gather({
-    input: "speech",
-    timeout: 4,
-    speechTimeout: "auto",
-    action: "/voice/handle-speech", // Twilio will POST user speech transcript here
-    method: "POST",
-  });
-  gather.say(
-    `${greeting} I am your AI assistant. Please tell me what you need help with.`
-  );
+    // Welcome message and start the first question
+    twiml.say(
+      `${greeting} I am your AI assistant. I have a few questions to better understand your needs. Let's get started.`
+    );
 
-  // If nothing said, retry quickly
-  twiml.redirect("/voice/retry");
+    // Redirect to the first question
+    twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=0`);
 
-  res.type("text/xml").send(twiml.toString());
-});
-
-app.post("/voice/retry", (_req, res) => {
-  const twiml = new twilio.twiml.VoiceResponse();
-  const gather = twiml.gather({
-    input: "speech",
-    timeout: 4,
-    speechTimeout: "auto",
-    action: "/voice/handle-speech",
-    method: "POST",
-  });
-  gather.say("I didn't catch that. Please say your request after the beep.");
-  res.type("text/xml").send(twiml.toString());
+    res.type("text/xml").send(twiml.toString());
+  } catch (err) {
+    console.error("Error in voice endpoint:", err);
+    const twiml = new twilio.twiml.VoiceResponse();
+    twiml.say("Sorry, there was an error. Please try again later. Goodbye!");
+    res.type("text/xml").send(twiml.toString());
+  }
 });
 
 /**
- * STEP C: Handle the user's speech from Twilio STT.
- * For demo, we just repeat back the transcript and end the call.
- * You can route this text to your LLM/agent and <Say> their answer.
+ * STEP C: Ask questions one by one
  */
+app.post("/voice/question", async (req, res) => {
+  try {
+    const twiml = new twilio.twiml.VoiceResponse();
+    const leadId = req.query.leadId;
+    const questionIndex = parseInt(req.query.questionIndex) || 0;
+
+    if (!leadId) {
+      twiml.say("Error: Lead ID not found. Goodbye!");
+      return res.type("text/xml").send(twiml.toString());
+    }
+
+    // Get all questions
+    const questions = await db.getQuestions();
+    
+    if (questionIndex >= questions.length) {
+      // All questions completed
+      twiml.say("Thank you for answering all the questions. A team member will review your responses and contact you shortly. Have a great day!");
+      return res.type("text/xml").send(twiml.toString());
+    }
+
+    const currentQuestion = questions[questionIndex];
+
+    // Ask the current question
+    const gather = twiml.gather({
+      input: "speech",
+      timeout: 8,
+      speechTimeout: "auto",
+      action: `/voice/handle-answer?leadId=${encodeURIComponent(leadId)}&questionIndex=${questionIndex}`,
+      method: "POST",
+    });
+    
+    gather.say(`Question ${questionIndex + 1}: ${currentQuestion.question_text}`);
+
+    // If no response, retry the same question
+    twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=${questionIndex}`);
+
+    res.type("text/xml").send(twiml.toString());
+  } catch (err) {
+    console.error("Error in question endpoint:", err);
+    const twiml = new twilio.twiml.VoiceResponse();
+    twiml.say("Sorry, there was an error. Please try again later. Goodbye!");
+    res.type("text/xml").send(twiml.toString());
+  }
+});
+
+/**
+ * STEP D: Handle the user's answer and move to next question
+ */
+app.post("/voice/handle-answer", async (req, res) => {
+  try {
+    const twiml = new twilio.twiml.VoiceResponse();
+    const leadId = req.query.leadId;
+    const questionIndex = parseInt(req.query.questionIndex) || 0;
+    const speechResult = (req.body.SpeechResult || "").trim();
+    const confidence = parseFloat(req.body.SpeechResultConfidence) || 0;
+
+    if (!leadId) {
+      twiml.say("Error: Lead ID not found. Goodbye!");
+      return res.type("text/xml").send(twiml.toString());
+    }
+
+    if (!speechResult) {
+      twiml.say("I didn't catch that. Let me ask the question again.");
+      twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=${questionIndex}`);
+      return res.type("text/xml").send(twiml.toString());
+    }
+
+    // Get questions to find the current question ID
+    const questions = await db.getQuestions();
+    const currentQuestion = questions[questionIndex];
+
+    if (!currentQuestion) {
+      twiml.say("Error: Question not found. Goodbye!");
+      return res.type("text/xml").send(twiml.toString());
+    }
+
+    // Save the response to database
+    await db.saveResponse(leadId, currentQuestion.id, speechResult, confidence);
+
+    // Confirm the answer
+    twiml.say(`Thank you. You said: ${speechResult}`);
+
+    // Move to next question
+    const nextQuestionIndex = questionIndex + 1;
+    
+    if (nextQuestionIndex >= questions.length) {
+      // All questions completed
+      twiml.say("Perfect! That was the last question. Thank you for your time. A team member will review your responses and contact you shortly. Have a great day!");
+    } else {
+      // Continue to next question
+      twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=${nextQuestionIndex}`);
+    }
+
+    res.type("text/xml").send(twiml.toString());
+  } catch (err) {
+    console.error("Error in handle-answer endpoint:", err);
+    const twiml = new twilio.twiml.VoiceResponse();
+    twiml.say("Sorry, there was an error. Please try again later. Goodbye!");
+    res.type("text/xml").send(twiml.toString());
+  }
+});
+
+// Legacy endpoint for backward compatibility
 app.post("/voice/handle-speech", (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   const speechResult = (req.body.SpeechResult || "").trim();
@@ -120,11 +254,11 @@ app.post("/voice/handle-speech", (req, res) => {
     return res.type("text/xml").send(twiml.toString());
   }
 
-  // TODO: Send 'speechResult' to your AI model and replace the response below:
   twiml.say(`You said: ${speechResult}. Thanks! A team member will follow up shortly. Goodbye!`);
   res.type("text/xml").send(twiml.toString());
 });
 
 app.listen(PORT, () => {
   console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`📊 View leads at http://localhost:${PORT}/api/leads`);
 });

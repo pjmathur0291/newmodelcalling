@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Lead Capture - Admin Dashboard</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    .stat-number {
+      font-size: 2em;
+      font-weight: bold;
+      color: #007bff;
+    }
+    .stat-label {
+      color: #666;
+      margin-top: 5px;
+    }
+    .leads-container {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .lead-item {
+      border-bottom: 1px solid #eee;
+      padding: 20px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    .lead-item:hover {
+      background-color: #f8f9fa;
+    }
+    .lead-item:last-child {
+      border-bottom: none;
+    }
+    .lead-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .lead-name {
+      font-weight: bold;
+      color: #333;
+    }
+    .lead-phone {
+      color: #666;
+    }
+    .lead-date {
+      color: #999;
+      font-size: 0.9em;
+    }
+    .lead-responses {
+      margin-top: 15px;
+      padding: 15px;
+      background-color: #f8f9fa;
+      border-radius: 5px;
+      display: none;
+    }
+    .response-item {
+      margin-bottom: 10px;
+      padding: 10px;
+      background: white;
+      border-radius: 5px;
+      border-left: 4px solid #007bff;
+    }
+    .response-question {
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 5px;
+    }
+    .response-answer {
+      color: #666;
+    }
+    .response-confidence {
+      font-size: 0.8em;
+      color: #999;
+      margin-top: 5px;
+    }
+    .no-leads {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    .refresh-btn {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+    .refresh-btn:hover {
+      background-color: #0056b3;
+    }
+    .back-link {
+      text-align: center;
+      margin-top: 20px;
+    }
+    .back-link a {
+      color: #007bff;
+      text-decoration: none;
+    }
+    .back-link a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 AI Lead Capture - Admin Dashboard</h1>
+    
+    <button class="refresh-btn" onclick="loadLeads()">🔄 Refresh Data</button>
+    
+    <div class="stats" id="stats">
+      <div class="stat-card">
+        <div class="stat-number" id="totalLeads">-</div>
+        <div class="stat-label">Total Leads</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="todayLeads">-</div>
+        <div class="stat-label">Today's Leads</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="avgResponses">-</div>
+        <div class="stat-label">Avg Responses/Lead</div>
+      </div>
+    </div>
+    
+    <div class="leads-container" id="leadsContainer">
+      <div class="no-leads">Loading leads...</div>
+    </div>
+    
+    <div class="back-link">
+      <a href="/">← Back to Lead Capture Form</a>
+    </div>
+  </div>
+
+  <script>
+    let leadsData = [];
+
+    async function loadLeads() {
+      try {
+        const response = await fetch('/api/leads');
+        const data = await response.json();
+        
+        if (data.success) {
+          leadsData = data.leads;
+          displayLeads();
+          updateStats();
+        } else {
+          showError('Failed to load leads: ' + data.error);
+        }
+      } catch (error) {
+        showError('Network error: ' + error.message);
+      }
+    }
+
+    function displayLeads() {
+      const container = document.getElementById('leadsContainer');
+      
+      if (leadsData.length === 0) {
+        container.innerHTML = '<div class="no-leads">No leads found yet.</div>';
+        return;
+      }
+
+      container.innerHTML = leadsData.map(lead => `
+        <div class="lead-item" onclick="toggleResponses('${lead.id}')">
+          <div class="lead-header">
+            <div>
+              <div class="lead-name">${lead.name || 'Unknown'}</div>
+              <div class="lead-phone">${lead.phone_number}</div>
+            </div>
+            <div class="lead-date">${formatDate(lead.created_at)}</div>
+          </div>
+          <div class="lead-responses" id="responses-${lead.id}">
+            Loading responses...
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function toggleResponses(leadId) {
+      const responsesDiv = document.getElementById(`responses-${leadId}`);
+      
+      if (responsesDiv.style.display === 'block') {
+        responsesDiv.style.display = 'none';
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/leads/${leadId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+          const lead = data.lead;
+          responsesDiv.innerHTML = lead.responses && lead.responses.length > 0 
+            ? lead.responses.map(resp => `
+                <div class="response-item">
+                  <div class="response-question">${resp.question_text}</div>
+                  <div class="response-answer">${resp.answer || 'No answer provided'}</div>
+                  ${resp.confidence ? `<div class="response-confidence">Confidence: ${(resp.confidence * 100).toFixed(1)}%</div>` : ''}
+                </div>
+              `).join('')
+            : '<div class="no-leads">No responses recorded yet.</div>';
+        } else {
+          responsesDiv.innerHTML = '<div class="no-leads">Error loading responses.</div>';
+        }
+        
+        responsesDiv.style.display = 'block';
+      } catch (error) {
+        responsesDiv.innerHTML = '<div class="no-leads">Error loading responses.</div>';
+        responsesDiv.style.display = 'block';
+      }
+    }
+
+    function updateStats() {
+      const totalLeads = leadsData.length;
+      const today = new Date().toDateString();
+      const todayLeads = leadsData.filter(lead => 
+        new Date(lead.created_at).toDateString() === today
+      ).length;
+      
+      // Calculate average responses per lead
+      let totalResponses = 0;
+      leadsData.forEach(lead => {
+        if (lead.responses) {
+          totalResponses += lead.responses.length;
+        }
+      });
+      const avgResponses = totalLeads > 0 ? (totalResponses / totalLeads).toFixed(1) : 0;
+
+      document.getElementById('totalLeads').textContent = totalLeads;
+      document.getElementById('todayLeads').textContent = todayLeads;
+      document.getElementById('avgResponses').textContent = avgResponses;
+    }
+
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    }
+
+    function showError(message) {
+      const container = document.getElementById('leadsContainer');
+      container.innerHTML = `<div class="no-leads">Error: ${message}</div>`;
+    }
+
+    // Load leads on page load
+    loadLeads();
+
+    // Auto-refresh every 30 seconds
+    setInterval(loadLeads, 30000);
+  </script>
+</body>
+</html>
