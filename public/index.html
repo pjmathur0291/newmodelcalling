@@ -154,6 +154,13 @@
           }),
         });
 
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Server response:', errorText);
+          showResult(`❌ Server error (${response.status}): ${errorText}`, 'error');
+          return;
+        }
+
         const result = await response.json();
         
         if (result.success) {
@@ -163,6 +170,7 @@
           showResult(`❌ Error: ${result.error}`, 'error');
         }
       } catch (error) {
+        console.error('Fetch error:', error);
         showResult(`❌ Network error: ${error.message}`, 'error');
       } finally {
         submitBtn.disabled = false;

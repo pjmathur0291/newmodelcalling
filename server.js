@@ -4,7 +4,8 @@ const bodyParser = require("body-parser");
 const dotenv = require("dotenv");
 const path = require("path");
 const twilio = require("twilio");
-const db = require("./database");
+// Use Vercel-compatible database for serverless deployment
+const db = require("./database-vercel");
 
 dotenv.config();
 
@@ -12,8 +13,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const baseUrl = process.env.APP_BASE_URL; // e.g., https://abcd-1234.ngrok-free.app
 
-// Twilio client
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+// Twilio client - only initialize if credentials are available
+let client = null;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+  client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+} else {
+  console.warn('⚠️ Twilio credentials not found. Voice features will be disabled.');
+}
 
 // Initialize database
 db.initDatabase().then(() => {
@@ -42,6 +48,16 @@ app.get("/", (_req, res) => {
 // Admin dashboard
 app.get("/admin", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    twilio_configured: !!client,
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // API endpoint to view all leads
@@ -81,9 +97,18 @@ app.post("/api/call-user", async (req, res) => {
     if (!to) {
       return res.status(400).json({ success: false, error: "Phone must be in E.164 format (e.g. +14155552671)" });
     }
-    if (!baseUrl) {
-      return res.status(500).json({ success: false, error: "APP_BASE_URL is not set in .env" });
+
+    // Check if Twilio is configured
+    if (!client) {
+      return res.status(500).json({ 
+        success: false, 
+        error: "Twilio is not configured. Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables." 
+      });
     }
+
+    // For Vercel deployment, use the request host
+    const baseUrl = process.env.APP_BASE_URL || 
+                   `${req.protocol}://${req.get('host')}`;
 
     // Create a new lead in the database
     const leadId = await db.createLead(to, name);
@@ -173,7 +198,7 @@ app.post("/voice/question", async (req, res) => {
       method: "POST",
     });
     
-    gather.say(`Question ${questionIndex + 1}: ${currentQuestion.question_text}`);
+    gather.say(`Question ${questionIndex + 1}: ${currentQuestion.text}`);
 
     // If no response, retry the same question
     twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=${questionIndex}`);
