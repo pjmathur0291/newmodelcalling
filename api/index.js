@@ -15,10 +15,28 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // Twilio client - only initialize if credentials are available
 let client = null;
+
+// Debug environment variables (remove in production)
+console.log('Environment check:', {
+  hasAccountSid: !!process.env.TWILIO_ACCOUNT_SID,
+  hasAuthToken: !!process.env.TWILIO_AUTH_TOKEN,
+  hasPhoneNumber: !!process.env.TWILIO_PHONE_NUMBER,
+  nodeEnv: process.env.NODE_ENV
+});
+
 if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-  client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  try {
+    client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    console.log('✅ Twilio client initialized successfully');
+  } catch (error) {
+    console.error('❌ Error initializing Twilio client:', error);
+  }
 } else {
   console.warn('⚠️ Twilio credentials not found. Voice features will be disabled.');
+  console.log('Missing:', {
+    accountSid: !process.env.TWILIO_ACCOUNT_SID ? 'TWILIO_ACCOUNT_SID' : null,
+    authToken: !process.env.TWILIO_AUTH_TOKEN ? 'TWILIO_AUTH_TOKEN' : null
+  });
 }
 
 // Simple phone validator for E.164 format
@@ -34,7 +52,35 @@ app.get("/api/health", (req, res) => {
     status: "ok", 
     timestamp: new Date().toISOString(),
     twilio_configured: !!client,
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    env_vars: {
+      has_account_sid: !!process.env.TWILIO_ACCOUNT_SID,
+      has_auth_token: !!process.env.TWILIO_AUTH_TOKEN,
+      has_phone_number: !!process.env.TWILIO_PHONE_NUMBER,
+      account_sid_length: process.env.TWILIO_ACCOUNT_SID ? process.env.TWILIO_ACCOUNT_SID.length : 0,
+      auth_token_length: process.env.TWILIO_AUTH_TOKEN ? process.env.TWILIO_AUTH_TOKEN.length : 0
+    }
+  });
+});
+
+// Twilio configuration test endpoint
+app.get("/api/twilio-test", (req, res) => {
+  const config = {
+    has_account_sid: !!process.env.TWILIO_ACCOUNT_SID,
+    has_auth_token: !!process.env.TWILIO_AUTH_TOKEN,
+    has_phone_number: !!process.env.TWILIO_PHONE_NUMBER,
+    account_sid_preview: process.env.TWILIO_ACCOUNT_SID ? 
+      process.env.TWILIO_ACCOUNT_SID.substring(0, 10) + '...' : 'NOT_SET',
+    phone_number: process.env.TWILIO_PHONE_NUMBER || 'NOT_SET',
+    client_initialized: !!client
+  };
+  
+  res.json({
+    status: config.has_account_sid && config.has_auth_token ? 'configured' : 'not_configured',
+    config: config,
+    message: config.client_initialized ? 
+      'Twilio is properly configured and ready to make calls' : 
+      'Twilio is not configured. Check environment variables.'
   });
 });
 
@@ -77,7 +123,13 @@ app.post("/api/call-user", async (req, res) => {
     if (!client) {
       return res.status(500).json({ 
         success: false, 
-        error: "Twilio is not configured. Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables." 
+        error: "Twilio is not configured. Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables.",
+        debug: {
+          has_account_sid: !!process.env.TWILIO_ACCOUNT_SID,
+          has_auth_token: !!process.env.TWILIO_AUTH_TOKEN,
+          has_phone_number: !!process.env.TWILIO_PHONE_NUMBER,
+          environment: process.env.NODE_ENV
+        }
       });
     }
 
