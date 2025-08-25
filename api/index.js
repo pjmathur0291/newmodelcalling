@@ -52,11 +52,14 @@ app.get("/api/health", (req, res) => {
     status: "ok", 
     timestamp: new Date().toISOString(),
     twilio_configured: !!client,
+    google_sheets_configured: !!process.env.GOOGLE_SHEET_ID && !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
     environment: process.env.NODE_ENV || 'development',
     env_vars: {
       has_account_sid: !!process.env.TWILIO_ACCOUNT_SID,
       has_auth_token: !!process.env.TWILIO_AUTH_TOKEN,
       has_phone_number: !!process.env.TWILIO_PHONE_NUMBER,
+      has_google_sheet_id: !!process.env.GOOGLE_SHEET_ID,
+      has_google_service_account: !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
       account_sid_length: process.env.TWILIO_ACCOUNT_SID ? process.env.TWILIO_ACCOUNT_SID.length : 0,
       auth_token_length: process.env.TWILIO_AUTH_TOKEN ? process.env.TWILIO_AUTH_TOKEN.length : 0
     }
