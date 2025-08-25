@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
-const googleSheets = require('./google-sheets');
+const googleAppsScript = require('./google-apps-script');
 
 // In-memory storage for Vercel serverless environment (fallback)
 let leads = [];
@@ -15,22 +15,22 @@ let questions = [
 ];
 let responses = [];
 
-// Flag to track if Google Sheets is available
-let googleSheetsAvailable = false;
+// Flag to track if Google Apps Script is available
+let googleAppsScriptAvailable = false;
 
 // Initialize database
 async function initDatabase() {
   try {
-    // Try to initialize Google Sheets
-    googleSheetsAvailable = await googleSheets.initialize();
-    if (googleSheetsAvailable) {
-      console.log('✅ Using Google Sheets for data storage');
+    // Try to initialize Google Apps Script
+    googleAppsScriptAvailable = await googleAppsScript.initialize();
+    if (googleAppsScriptAvailable) {
+      console.log('✅ Using Google Apps Script for data storage');
     } else {
-      console.log('⚠️ Using in-memory storage (Google Sheets not configured)');
+      console.log('⚠️ Using in-memory storage (Google Apps Script not configured)');
     }
   } catch (error) {
     console.error('❌ Error initializing database:', error);
-    googleSheetsAvailable = false;
+    googleAppsScriptAvailable = false;
   }
 }
 
@@ -46,9 +46,9 @@ async function createLead(phoneNumber, name = null, callSid = null) {
     created_at: new Date().toISOString()
   };
 
-  // Save to Google Sheets if available
-  if (googleSheetsAvailable) {
-    await googleSheets.createLead(leadId, phoneNumber, name, callSid);
+  // Save to Google Apps Script if available
+  if (googleAppsScriptAvailable) {
+    await googleAppsScript.createLead(leadId, phoneNumber, name, callSid);
   }
 
   // Also save to in-memory storage as backup
@@ -58,14 +58,14 @@ async function createLead(phoneNumber, name = null, callSid = null) {
 
 // Get all active questions
 async function getQuestions() {
-  if (googleSheetsAvailable) {
+  if (googleAppsScriptAvailable) {
     try {
-      const sheetsQuestions = await googleSheets.getQuestions();
-      if (sheetsQuestions.length > 0) {
-        return sheetsQuestions;
+      const scriptQuestions = await googleAppsScript.getQuestions();
+      if (scriptQuestions.length > 0) {
+        return scriptQuestions;
       }
     } catch (error) {
-      console.error('Error fetching questions from Google Sheets:', error);
+      console.error('Error fetching questions from Google Apps Script:', error);
     }
   }
   
@@ -84,15 +84,15 @@ async function saveResponse(leadId, questionId, answer, confidence = null) {
     created_at: new Date().toISOString()
   };
 
-  // Save to Google Sheets if available
-  if (googleSheetsAvailable) {
+  // Save to Google Apps Script if available
+  if (googleAppsScriptAvailable) {
     try {
       const questions = await getQuestions();
       const question = questions.find(q => q.id === questionId);
       const questionText = question ? question.text : 'Unknown Question';
-      await googleSheets.saveResponse(leadId, questionId, questionText, answer, confidence);
+      await googleAppsScript.saveResponse(leadId, questionId, questionText, answer, confidence);
     } catch (error) {
-      console.error('Error saving response to Google Sheets:', error);
+      console.error('Error saving response to Google Apps Script:', error);
     }
   }
 
@@ -103,14 +103,14 @@ async function saveResponse(leadId, questionId, answer, confidence = null) {
 
 // Get lead with all responses
 async function getLeadWithResponses(leadId) {
-  if (googleSheetsAvailable) {
+  if (googleAppsScriptAvailable) {
     try {
-      const lead = await googleSheets.getLeadWithResponses(leadId);
+      const lead = await googleAppsScript.getLeadWithResponses(leadId);
       if (lead) {
         return lead;
       }
     } catch (error) {
-      console.error('Error fetching lead from Google Sheets:', error);
+      console.error('Error fetching lead from Google Apps Script:', error);
     }
   }
 
@@ -138,14 +138,14 @@ async function getLeadWithResponses(leadId) {
 
 // Get all leads
 async function getAllLeads() {
-  if (googleSheetsAvailable) {
+  if (googleAppsScriptAvailable) {
     try {
-      const sheetsLeads = await googleSheets.getAllLeads();
-      if (sheetsLeads.length > 0) {
-        return sheetsLeads.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const scriptLeads = await googleAppsScript.getAllLeads();
+      if (scriptLeads.length > 0) {
+        return scriptLeads.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       }
     } catch (error) {
-      console.error('Error fetching leads from Google Sheets:', error);
+      console.error('Error fetching leads from Google Apps Script:', error);
     }
   }
 
