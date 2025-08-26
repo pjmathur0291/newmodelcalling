@@ -4,6 +4,7 @@ const path = require('path');
 const twilio = require('twilio');
 const db = require('../database-vercel');
 const embedRouter = require('./embed');
+const aiService = require('../ai-conversation');
 
 const app = express();
 
@@ -106,6 +107,18 @@ app.get("/api/leads/:leadId", async (req, res) => {
     if (!lead) {
       return res.status(404).json({ success: false, error: "Lead not found" });
     }
+    
+    // Add AI analysis if requested
+    if (req.query.analyze === 'true') {
+      try {
+        const analysis = await aiService.analyzeLeadQuality(req.params.leadId, lead.responses);
+        lead.aiAnalysis = analysis;
+      } catch (error) {
+        console.error('Error analyzing lead:', error);
+        lead.aiAnalysis = { error: 'Analysis failed' };
+      }
+    }
+    
     res.json({ success: true, lead });
   } catch (err) {
     console.error("Error fetching lead:", err);
@@ -180,11 +193,14 @@ app.post("/voice", async (req, res) => {
       return res.type("text/xml").send(twiml.toString());
     }
 
-    const greeting = name ? `Hello ${name}.` : "Hello.";
+    // Get lead info for AI greeting
+    const lead = await db.getLeadWithResponses(leadId);
+    const company = lead?.responses?.find(r => r.question_text?.includes('company'))?.answer;
 
-    twiml.say(
-      `${greeting} I am your AI assistant. I have a few questions to better understand your needs. Let's get started.`
-    );
+    // Generate AI-powered greeting
+    const greeting = await aiService.generateGreeting(name, company);
+
+    twiml.say(greeting);
 
     twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=0`);
 
@@ -212,11 +228,29 @@ app.post("/voice/question", async (req, res) => {
     const questions = await db.getQuestions();
     
     if (questionIndex >= questions.length) {
-      twiml.say("Thank you for answering all the questions. A team member will review your responses and contact you shortly. Have a great day!");
+      // Generate AI-powered closing message
+      const lead = await db.getLeadWithResponses(leadId);
+      const allAnswers = lead?.responses || [];
+      const closingMessage = await aiService.generateClosingMessage(leadId, allAnswers);
+      
+      twiml.say(closingMessage);
       return res.type("text/xml").send(twiml.toString());
     }
 
-    const currentQuestion = questions[questionIndex];
+    // Try to generate AI follow-up question
+    let currentQuestion = questions[questionIndex];
+    let questionText = currentQuestion.text;
+
+    if (questionIndex > 0) {
+      // Get previous answers for context
+      const lead = await db.getLeadWithResponses(leadId);
+      const previousAnswers = lead?.responses || [];
+      
+      const aiQuestion = await aiService.generateFollowUpQuestion(leadId, previousAnswers, questionIndex);
+      if (aiQuestion) {
+        questionText = aiQuestion;
+      }
+    }
 
     const gather = twiml.gather({
       input: "speech",
@@ -226,7 +260,7 @@ app.post("/voice/question", async (req, res) => {
       method: "POST",
     });
     
-    gather.say(`Question ${questionIndex + 1}: ${currentQuestion.text}`);
+    gather.say(`Question ${questionIndex + 1}: ${questionText}`);
 
     twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=${questionIndex}`);
 
@@ -269,12 +303,19 @@ app.post("/voice/handle-answer", async (req, res) => {
 
     await db.saveResponse(leadId, currentQuestion.id, speechResult, confidence);
 
-    twiml.say(`Thank you. You said: ${speechResult}`);
+    // Generate AI-powered response to the answer
+    const aiResponse = await aiService.generateResponseToAnswer(leadId, currentQuestion.text, speechResult);
+    twiml.say(aiResponse);
 
     const nextQuestionIndex = questionIndex + 1;
     
     if (nextQuestionIndex >= questions.length) {
-      twiml.say("Perfect! That was the last question. Thank you for your time. A team member will review your responses and contact you shortly. Have a great day!");
+      // Generate AI-powered closing message
+      const lead = await db.getLeadWithResponses(leadId);
+      const allAnswers = lead?.responses || [];
+      const closingMessage = await aiService.generateClosingMessage(leadId, allAnswers);
+      
+      twiml.say(closingMessage);
     } else {
       twiml.redirect(`/voice/question?leadId=${encodeURIComponent(leadId)}&questionIndex=${nextQuestionIndex}`);
     }
